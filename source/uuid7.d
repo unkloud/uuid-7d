@@ -3,7 +3,6 @@ module uuid7;
 import std.uuid;
 import std.random;
 import std.datetime;
-import core.atomic;
 
 private
 {
