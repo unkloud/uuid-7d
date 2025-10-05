@@ -6,5 +6,6 @@
 	"copyright": "Copyright © 2025, unkloud",
 	"description": "UUID7 generator",
 	"license": "CC-BY-SA-4.0",
-	"name": "uuid7"
+	"name": "uuid7",
+	"version": "2025.4.1"
 }

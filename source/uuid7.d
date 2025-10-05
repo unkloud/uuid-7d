@@ -1,36 +1,90 @@
 module uuid7;
 
-import std.uuid;
-import std.random;
+import core.atomic;
+import core.stdc.time;
+import core.time;
 import std.datetime;
+import std.datetime.systime;
+import std.random;
+import std.uuid;
 
-private
+enum NS_PER_S = 1_000_000_000L;
+enum NS_PER_MS = 1_000_000L;
+enum NS_PER_US = 1000L;
+enum US_PER_MS = 1000L;
+version (Windows)
+	enum SUBMS_MINIMAL_STEP_BITS = 10;
+else version (OSX)
+	enum SUBMS_MINIMAL_STEP_BITS = 10;
+else version (linux)
+	enum SUBMS_MINIMAL_STEP_BITS = 12;
+else
+	enum SUBMS_MINIMAL_STEP_BITS = 12;
+enum SUBMS_MINIMAL_STEP_NS = ((NS_PER_MS / (1 << SUBMS_MINIMAL_STEP_BITS)) + 1);
+enum SUBMS_BITS = 12L;
+// hecto-nanosecond
+enum HNSEC = 100;
+// See https://dlang.org/phobos/std_datetime_systime.html#.SysTime.toUnixTime for details
+enum HNSEC_TIL_EPOCH = 621_355_968_000_000_000L;
+
+long get_real_time_ns_ascending()
 {
-	__gshared Random rng;
-	shared uint counter;
+	static shared long previous_hnsec = 0;
+	long now_hnsec = Clock.currTime(UTC()).stdTime - HNSEC_TIL_EPOCH;
+	while (true)
+	{
+		long prev = atomicLoad(previous_hnsec);
+		long next_hnsec = now_hnsec;
+		if (next_hnsec * HNSEC < prev * HNSEC + SUBMS_MINIMAL_STEP_NS)
+		{
+			next_hnsec = prev + SUBMS_MINIMAL_STEP_BITS / HNSEC;
+		}
+		if (cas(&previous_hnsec, prev, next_hnsec))
+		{
+			return next_hnsec * HNSEC;
+		}
+		now_hnsec = Clock.currTime(UTC()).stdTime - HNSEC_TIL_EPOCH;
+	}
 }
 
-shared static this()
+void uuid_set_version(ubyte[] buf, ubyte v)
 {
-	rng = Random(unpredictableSeed);
+	buf[6] = cast(ubyte)((buf[6] & 0x0f) | (v << 4));
+	buf[8] = cast(ubyte)(buf[8] & 0x3f) | 0x80;
 }
 
 UUID uuid7()
 {
-	ubyte[16] buf;
-	foreach (ref ubyte i; buf)
+	static Random threadRng;
+	static bool rngInitialized = false;
+	if (!rngInitialized)
 	{
-		i = uniform(ubyte.min, ubyte.max, rng);
+		threadRng = Random(unpredictableSeed);
+		rngInitialized = true;
 	}
-	ulong epochMs = Clock.currTime().toUnixTime() * 1000;
+	ubyte[16] buf;
+	long ns = get_real_time_ns_ascending();
+	ulong epochMs = ns / NS_PER_MS;
+	uint sub_ms = cast(uint)(ns % NS_PER_MS);
 	buf[0] = (epochMs >> 40) & 0xFF;
 	buf[1] = (epochMs >> 32) & 0xFF;
 	buf[2] = (epochMs >> 24) & 0xFF;
 	buf[3] = (epochMs >> 16) & 0xFF;
 	buf[4] = (epochMs >> 8) & 0xFF;
 	buf[5] = epochMs & 0xFF;
-	buf[6] = (buf[6] & 0x0F) | 0x70;
-	buf[8] = (buf[8] & 0x0F) | 0x80;
+	uint increased_clock_precision = (sub_ms * (1 << SUBMS_BITS)) / NS_PER_MS;
+	buf[6] = cast(ubyte)(increased_clock_precision >> 8);
+	buf[7] = cast(ubyte)(increased_clock_precision);
+	foreach (i; 8 .. 16)
+	{
+		buf[i] = uniform!ubyte(threadRng);
+	}
+	if (SUBMS_MINIMAL_STEP_BITS == 10)
+	{
+		// https://github.com/postgres/postgres/blob/master/src/backend/utils/adt/uuid.c#L633
+		buf[7] = buf[7] ^ (buf[8] >> 6);
+	}
+	uuid_set_version(buf, 7);
 	return UUID(buf);
 }
 
@@ -61,13 +115,26 @@ unittest
 
 unittest
 {
-	import std.stdio;
 	import core.thread;
+	import std.stdio;
 
 	auto u1 = uuid7();
-	Thread.sleep(1.seconds);
 	auto u2 = uuid7();
+	auto u3 = uuid7();
+	auto u4 = uuid7();
+	auto u5 = uuid7();
+	auto u6 = uuid7();
+	auto u7 = uuid7();
+	auto u8 = uuid7();
+	auto u9 = uuid7();
 	assert(u1 < u2);
+	assert(u2 < u3);
+	assert(u3 < u4);
+	assert(u4 < u5);
+	assert(u5 < u6);
+	assert(u6 < u7);
+	assert(u7 < u8);
+	assert(u8 < u9);
 }
 
 unittest
@@ -77,7 +144,7 @@ unittest
 	import std.algorithm;
 	import std.range;
 
-	enum N = 10_000;
+	enum N = 1_000_000;
 	auto seen = appender!(UUID[])();
 	seen.reserve(N);
 	iota(N).each!(_ => seen.put(uuid7()));
