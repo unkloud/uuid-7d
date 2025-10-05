@@ -113,13 +113,9 @@ assert(id1 < id2);        // Always true due to monotonic guarantees
 
 ## Comparison with Standard UUID v7
 
-| Feature | Standard UUID v7 | This Implementation |
-|---------|------------------|-------------------|
-| Monotonic ordering | Best-effort | Guaranteed |
-| Thread safety | Implementation-dependent | Lock-free atomic |
-| Sub-ms precision | Optional | Always enabled |
-| Platform optimization | None | OS-specific tuning |
-| PostgreSQL compatibility | N/A | Full compatibility |
+This is largely a port of PostgreSQL implementation. The major difference from the standard is extra bits are being used to enhance the time precision. On linux it is 12bits, on Windows/MacOS it is 10 bits.
+Details can be found in the C source code I listed below.
+
 
 ## Testing
 
